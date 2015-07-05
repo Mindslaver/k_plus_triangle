@@ -1,5 +1,4 @@
 #include "SparseDataLoader.h"
-#include "DataTypeConverter.h"
 
 void SparseDataLoader::readSparseData(std::string filename){
 
@@ -34,4 +33,9 @@ void SparseDataLoader::displayRow(){
             }
         std::cout << std::endl;
 	}
+}
+
+SparseDataVector SparseDataLoader::getRowVector()
+{
+    return rowVector;
 }

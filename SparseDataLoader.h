@@ -1,6 +1,5 @@
 #ifndef SPARSEDATALOADER_H
 #define SPARSEDATALOADER_H
-
 #include "Typedef.h"
 #include <string>
 #include <iostream>
@@ -8,16 +7,19 @@
 #include <sstream>
 #include <iterator>
 
-class SparseDataLoader{
+/**
+ *  Class used to load and store sparse data
+ */
+
+class SparseDataLoader
+{
 	public:
-    SparseDataLoader():maxIndex(0){}
+    SparseDataLoader():maxIndex(0)
+    {
+    }
 	
     void readSparseData(std::string filename);
-    SparseDataVector getRowVector()
-    {
-		return rowVector;
-	}
-	
+    SparseDataVector getRowVector();
 	void displayRow();
     int maxIndex;
 

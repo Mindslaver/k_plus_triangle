@@ -12,27 +12,27 @@ SparseRecord::SparseRecord(vector<pair<int, float>> p, float d, int i) : paramet
     id=i;
 }
 
-float SparseRecord::calculateDistance(SparseRecord reference_point, int p)
+float SparseRecord::calculateDistance(SparseRecord reference_record, int p)
 {
     float sum = 0;
 
     int dimensionT = parameters.size();
-    int dimensionB = reference_point.parameters.size();
+    int dimensionB = reference_record.parameters.size();
     int top=0;
     int bot=0;
     bool skipBot=false;
     bool skipTop=false;
     while(1)
     {
-        if(parameters[top].first>reference_point.parameters[bot].first)
+        if(parameters[top].first>reference_record.parameters[bot].first)
         {
-            sum += fabs(pow(reference_point.parameters[bot].second, p));
+            sum += fabs(pow(reference_record.parameters[bot].second, p));
             if(bot+1!=dimensionB)
                 ++bot;
             else
                 skipBot=true;
         }
-        else if(parameters[top].first<reference_point.parameters[bot].first)
+        else if(parameters[top].first<reference_record.parameters[bot].first)
         {
             sum += fabs(pow(parameters[top].second, p));
             if(top+1!=dimensionT)
@@ -42,7 +42,7 @@ float SparseRecord::calculateDistance(SparseRecord reference_point, int p)
         }
         else
         {
-            sum += fabs(pow(parameters[top].second - reference_point.parameters[bot].second, p));
+            sum += fabs(pow(parameters[top].second - reference_record.parameters[bot].second, p));
             if(top+1!=dimensionT)
                 ++top;
             else
@@ -71,7 +71,7 @@ float SparseRecord::calculateDistance(SparseRecord reference_point, int p)
         {
             while(1)
             {
-                sum += fabs(pow(reference_point.parameters[bot].second, p));
+                sum += fabs(pow(reference_record.parameters[bot].second, p));
                 if(bot+1!=dimensionB)
                     ++bot;
                 else
@@ -81,8 +81,10 @@ float SparseRecord::calculateDistance(SparseRecord reference_point, int p)
     }
 }
 
-bool SparseRecord::operator==(SparseRecord p) {
-    if ((*this).parameters == p.parameters) {
+bool SparseRecord::operator==(SparseRecord p)
+{
+    if ((*this).parameters == p.parameters)
+    {
         return true;
     } else
         return false;

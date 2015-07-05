@@ -1,3 +1,55 @@
+/**
+*
+* Author: Adam Anrzejczak
+* Date: 2015-01-15
+*
+* Description:  Implementation of a k+ neighbours algorithm with a triangle inequality optimization
+*               for both sparse and dense data.
+*
+* References:
+*
+*   "A Neighborhood-Based Clustering by Means of the Triangle Inequality."
+*   Marzena Kryszkiewicz and Piotr Lasek.
+*   Institute of Computer Science, Warsaw University of Technology.
+*
+*   Abstract:
+*   Grouping data into meaningful clusters is an important task of both artificial
+*   intelligence and data mining. An important group of clustering algorithms are
+*   density based ones that require calculation of a neighborhood of a given data
+*   record. The bottleneck for such algorithms are high dimensional data. In this
+*   paper, we propose a new TI-k-Neighborhood-Index algorithm that calculates
+*   k-neighborhoods for all records in a given data set by means the triangle
+*   inequality. We prove experimentally that the NBC (Neighborhood Based
+*   Clustering) clustering algorithm supported by our index outperforms NBC
+*   supported by such known spatial indices as VA-file and R-tree both in the case
+*   of low and high dimensional data.
+*
+*
+*
+*   Usage example:
+*    -k 6 -p -D dense.csv -O object.csv -n 2 -o -m 2 -f -c
+*
+*   Parameters:
+*    -k <number of neighbours>
+*    -D <path to the database file>
+*    -O <path to the file with objects to classify>
+*    -d <path to the file with classes names>
+*    -n <column that stores class name; counted from 1 upwards>
+*    -m <metric; 1=manhattan, 2=euclidean>
+*
+*   Switches:
+*    -p using k+ modification; off by default
+*    -s indication, that data records are of the sparse format
+*    -o suppresses terminal output (except for setup and log messages)
+*    -c treat dense data as sparse or sparse data as dense - not recommended
+*    -b brute force, namely no triangle optimization (~1000x slower)
+*    -t more detailed output
+*    -f forward heuristic, backward by default
+*
+*   Output file is called output.txt and is overwritten with every run.
+*
+*/
+
 #include "SparseRecord.h"
 #include "DenseRecord.h"
 #include "DenseDataLoader.h"
@@ -7,44 +59,48 @@
 #include <time.h>
 #include <unistd.h>
 #include <map>
-#include <stdio.h>
-#include <string.h>
 #include <iostream>
 #include <algorithm>
 #include <vector>
 #include <list>
 #include <cmath>
 #include <initializer_list>
-#include <cstdlib>
 #include <string>
-#include <cstdio>
 
 using namespace std;
 
-struct k_neighborhood_index {
-    vector <DenseRecord> samplePoints;
+/**
+ *  Structures that store the lists of the k nearest neighbours for the objects that will be classified.
+ *  They will be assigned to the class that is the most frequent for the respective k neighbours set.
+ */
+struct k_neighborhood_index
+{
+    vector <DenseRecord> objectRecords;
     vector <list<DenseRecord>> tkn;
     void insert(DenseRecord p, list<DenseRecord> tkN)
     {
-        samplePoints.push_back(p);
+        objectRecords.push_back(p);
         tkn.push_back(tkN);
     }
 };
-
-struct k_neighborhood_index_sparse {
-    vector <SparseRecord> samplePoints;
+struct k_neighborhood_index_sparse
+{
+    vector <SparseRecord> objectRecords;
     vector <list<SparseRecord>> tkn;
     void insert(SparseRecord p, list<SparseRecord> tkN)
     {
-        samplePoints.push_back(p);
+        objectRecords.push_back(p);
         tkn.push_back(tkN);
     }
 };
 
-struct first_further
+/**
+ *  Structure used for defining comparison between epsilon distance (worst-case heuristic) and real distance from the object of classification.
+ */
+struct firstFurther
 {
     float distance_of_e;
-    first_further(float distance_of_e) : distance_of_e(distance_of_e)
+    firstFurther(float distance_of_e) : distance_of_e(distance_of_e)
     {
     }
     bool operator ()(DenseRecord current)
@@ -57,6 +113,9 @@ struct first_further
     }
 };
 
+/**
+ *  Structure used for defining comparison between two records.
+ */
 struct compareRecords
 {
     bool operator ()(DenseRecord a, DenseRecord b)
@@ -69,10 +128,15 @@ struct compareRecords
     }
 } comparisonFunction;
 
-template <class kni_type, class data_type> void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type reference_point, vector<data_type> &s);
+//The algorithm for finding k nearest neighbours
 template <class data_type> list<data_type> ti_k_neighborhood(vector<data_type> &D, data_type p, int k);
-template <class data_type> bool precedingdata_type(vector<data_type> &D, data_type &p);
-template <class data_type> bool followingdata_type(vector<data_type> &D, data_type &p);
+//Function that runs the algorithm for every object and classifies them according to their k neighbours sets
+template <class kni_type, class data_type> void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type reference_record, vector<data_type> &O);
+
+//Functions used by ti_k_neighborhood algorithm. Their names are self explanatory IFF you read the article given in references.
+//Unfortunately, I am not autorised to post anything but its abstract.
+template <class data_type> bool precedingRecord(vector<data_type> &D, data_type &p);
+template <class data_type> bool followingRecord(vector<data_type> &D, data_type &p);
 template <class data_type> void find_first_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p,
         data_type &f, bool &forwardSearch, list<data_type> &k_neighborhood, int k,
         int &i);
@@ -87,32 +151,45 @@ template <class data_type> void verify_k_candidate_neighbours_forward(vector<dat
 template <class data_type> void verify_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p,
         data_type &b, bool &backwardSearch, list<data_type> &k_neighborhood, int k);
 
-vector<DenseRecord> createPointVector(DenseDataVector denseDataVector, int decisionColumnNumber);
-vector<SparseRecord> createPointVector(SparseDataVector sparseDataVector, int decisionColumnNumber);
+vector<DenseRecord> createRecordVector(DenseDataVector denseDataVector, int decisionColumnNumber);
+vector<SparseRecord> createRecordVector(SparseDataVector sparseDataVector, int decisionColumnNumber);
 vector <string> readDecisionClass(string filename);
-
 vector <string> decisionClass;
 
+//The exponent value used for calculating the distance between two records i.e. dist = pow[((x1-y1)^metric),metric^-1]
 int metric;
+
+//If the decision class is specified as one of the records' parameter its column number is stored here
 int decisionClassColumn=0;
+
+//The id of the object for which we are looking for k/k+ nearest neighbours (if no object file is specified)
 int objectNumber;
 
+//K+ switch, K by default (so even if there is K+n records that are equally distant from the object, only K will be considered)
 bool k_plus = false;
+
+//Output is presented in the terminal by default
 bool terminal_output=true;
+
 bool column_decision=false;
+
+//No triangle inequality property taken into accout
 bool brute_force=false;
+
+//If the output should contain records parameters
 bool talkative=false;
+
+//Heuristis mode, backward by default
 bool forward_heuristic=false;
 
+//Number of comparisions between a given object and the dataset
 vector <int> numberOfComparisons;
 vector <map <string, int>> choosenClass;
 vector <map <string, int>> choosenClassTerminal;
 
-
 int main(int argc, char* argv[])
 {
     metric=2;
-
     time_t t;
     srand((unsigned) time(&t));
     float startLoadTime = (float)clock()/CLOCKS_PER_SEC;
@@ -120,23 +197,22 @@ int main(int argc, char* argv[])
     enum {undefined=-1};
     int k = undefined;
 
-    DenseDataLoader sample_loader;
-    DenseDataLoader dataset_loader;
-
-    SparseDataLoader sample_loader_sparse;
-    SparseDataLoader dataset_loader_sparse;
+    DenseDataLoader object;
+    DenseDataLoader dataset;
+    SparseDataLoader objectSparse;
+    SparseDataLoader datasetSparse;
 
     bool swap_data = false;
-    bool sample_defined=false;
+    bool object_defined=false;
     bool dataset_defined=false;
     bool file_decision=false;
     bool sparse_data=false;
 
     string fileData;
-    string fileSample;
+    string fileObject;
 
     int c;
-    while((c = getopt(argc, argv,"D:S:cd:n:ptom:k:bfs")) != -1)
+    while((c = getopt(argc, argv,"D:O:cd:n:ptom:k:bfs")) != -1)
     {
         switch(c)
         {
@@ -148,12 +224,12 @@ int main(int argc, char* argv[])
                     dataset_defined=true;
                 }
                 break;
-            case 'S':
+            case 'O':
                 if(optarg)
                 {
-                    cout << "Setup: Reading sample from file: " << optarg << endl;
-                    fileSample = optarg;
-                    sample_defined=true;
+                    cout << "Setup: Reading object from file: " << optarg << endl;
+                    fileObject = optarg;
+                    object_defined=true;
                 }
                 break;
             case 'c':
@@ -233,31 +309,31 @@ int main(int argc, char* argv[])
     if(!dataset_defined)
     {
         if(!sparse_data)
-            dataset_loader.readDenseData("dense.csv");
+            dataset.readDenseData("dense.csv");
         else
-            dataset_loader_sparse.readSparseData("cranmed.mat");
+            datasetSparse.readSparseData("cranmed.mat");
     }
     else
     {
         if(!sparse_data)
-            dataset_loader.readDenseData(fileData);
+            dataset.readDenseData(fileData);
         else
-            dataset_loader_sparse.readSparseData(fileData);
+            datasetSparse.readSparseData(fileData);
     }
-    if(!sample_defined)
+    if(!object_defined)
     {
         if(!sparse_data)
-            sample_loader.readDenseData("sample.csv");
+            object.readDenseData("object.csv");
         else
-            sample_loader_sparse.readSparseData("cranmedSamples.csv");
+            objectSparse.readSparseData("cranmedobjects.csv");
     }
     else
     {
         if(!sparse_data)
-            sample_loader.readDenseData(fileSample);
+            object.readDenseData(fileObject);
         else
         {
-            sample_loader_sparse.readSparseData(fileSample);
+            objectSparse.readSparseData(fileObject);
         }
     }
     if(!file_decision&&decisionClassColumn<1)
@@ -271,35 +347,40 @@ int main(int argc, char* argv[])
     {
         decisionClass=readDecisionClass(fileData);
     }
+    if(!file_decision && !column_decision)
+    {
+        cout << "No decision factor specified (-d <file> or -n <column>)" << endl;
+        return -1;
+    }
     if(swap_data)
     {
-        DataTypeConverter converter;
+        //DataTypeConverter converter;
         int max_index;
         if(sparse_data)
         {
-            if(dataset_loader_sparse.maxIndex>dataset_loader.maxIndex)
-                max_index=dataset_loader_sparse.maxIndex;
+            if(datasetSparse.maxIndex>dataset.maxIndex)
+                max_index=datasetSparse.maxIndex;
             else
-                max_index=dataset_loader.maxIndex;
+                max_index=dataset.maxIndex;
         }
         if(sparse_data)
         {
-            dataset_loader.denseDataVector = converter.sparseToDense(dataset_loader_sparse.rowVector,max_index);
-            sample_loader.denseDataVector  = converter.sparseToDense(sample_loader_sparse.rowVector,max_index);
+            dataset.denseDataVector = DataTypeConverter::sparseToDense(datasetSparse.rowVector,max_index);
+            object.denseDataVector  = DataTypeConverter::sparseToDense(objectSparse.rowVector,max_index);
         }
         else
         {
-            dataset_loader_sparse.rowVector = converter.denseToSparse(dataset_loader.denseDataVector);
-            sample_loader_sparse.rowVector  = converter.denseToSparse(sample_loader.denseDataVector);
+            datasetSparse.rowVector = DataTypeConverter::denseToSparse(dataset.denseDataVector);
+            objectSparse.rowVector  = DataTypeConverter::denseToSparse(object.denseDataVector);
         }
     }
 
-    vector<DenseRecord> D = createPointVector(dataset_loader.denseDataVector,decisionClassColumn);
-    vector<DenseRecord> s = createPointVector(sample_loader.denseDataVector, decisionClassColumn);
-    vector<SparseRecord> D_sparse = createPointVector(dataset_loader_sparse.rowVector,decisionClassColumn);
-    vector<SparseRecord> s_sparse = createPointVector(sample_loader_sparse.rowVector, decisionClassColumn);
+    vector<DenseRecord> D = createRecordVector(dataset.denseDataVector,decisionClassColumn);
+    vector<DenseRecord> s = createRecordVector(object.denseDataVector, decisionClassColumn);
+    vector<SparseRecord> D_sparse = createRecordVector(datasetSparse.rowVector,decisionClassColumn);
+    vector<SparseRecord> s_sparse = createRecordVector(objectSparse.rowVector, decisionClassColumn);
 
-    if(D.size()*s.size()==0&&D_sparse.size()*s_sparse.size()==0)
+    if(0 == D.size()*s.size() && 0 == D_sparse.size()*s_sparse.size())
     {
         cout << "Error while reading data" << endl;
         return -1;
@@ -362,54 +443,54 @@ int main(int argc, char* argv[])
 
 
 template <class kni_type, class data_type>
-void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type reference_point, vector<data_type> &s)
+void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type reference_record, vector<data_type> &O)
 {
     kni_type kni;
-    int number_of_points_in_D = D.size();
+    int number_of_records_in_D = D.size();
     if(terminal_output)
         cout << "Dataset: " << endl;
-    for(int i = 0; i<number_of_points_in_D; ++i)
+    for(int i = 0; i<number_of_records_in_D; ++i)
     {
         if(!brute_force)
-            D[i].distance = D[i].calculateDistance(reference_point,metric);
+            D[i].distance = D[i].calculateDistance(reference_record,metric);
         D[i].id=i+1;
         if(terminal_output)
             cout << i << "\t" << D[i] << endl;
     }
     if(terminal_output)
-        cout << "Samples: " << endl;
-    int number_of_points_in_s = s.size();
-    data_type **samples = new data_type*[number_of_points_in_s];
-    for(int i = 0; i<number_of_points_in_s; ++i)
+        cout << "Objects: " << endl;
+    int number_of_records_in_O = O.size();
+    data_type **objects = new data_type*[number_of_records_in_O];
+    for(int i = 0; i<number_of_records_in_O; ++i)
     {
-        samples[i] = &s[i];
-        s[i].distance = s[i].calculateDistance(reference_point,metric);
-        s[i].id=-1-i;
+        objects[i] = &O[i];
+        O[i].distance = O[i].calculateDistance(reference_record,metric);
+        O[i].id=-1-i;
         if(terminal_output)
-            cout << i << "\t" << s[i] << endl;
+            cout << i << "\t" << O[i] << endl;
     }
-    choosenClass.resize(number_of_points_in_s);
-    choosenClassTerminal.resize(number_of_points_in_s);
-    typename vector<data_type>::iterator sample;
-    for(int i=0; i<number_of_points_in_s; ++i)
+    choosenClass.resize(number_of_records_in_O);
+    choosenClassTerminal.resize(number_of_records_in_O);
+    typename vector<data_type>::iterator object;
+    for(int i=0; i<number_of_records_in_O; ++i)
     {
         objectNumber=i;
-        D.insert(D.end(),(s.begin()+i),(s.begin()+i+1));
+        D.insert(D.end(),(O.begin()+i),(O.begin()+i+1));
         std::sort(D.begin(),D.end(),comparisonFunction);
-        int curr_number_of_points_in_D=D.size();
-        for(int i = 0; i<curr_number_of_points_in_D; ++i)
+        int curr_number_of_records_in_D=D.size();
+        for(int i = 0; i<curr_number_of_records_in_D; ++i)
         {
             D[i].position=i;
         }
-        sample=find(D.begin(),D.end(),*samples[i]);
-        kni.insert((*sample), ti_k_neighborhood<data_type>(D,(*sample),k));
-        D.erase(sample);
-        if(100*i/number_of_points_in_s%2==0)
+        object=find(D.begin(),D.end(),*objects[i]);
+        kni.insert((*object), ti_k_neighborhood<data_type>(D,(*object),k));
+        D.erase(object);
+        if(100*i/number_of_records_in_O%2==0)
         {
-            cout << "Processing: " << 100*i/number_of_points_in_s << "%";
-            if(100*i/number_of_points_in_s<10)
+            cout << "Processing: " << 100*i/number_of_records_in_O << "%";
+            if(100*i/number_of_records_in_O<10)
                 cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
-            else if (100*i/number_of_points_in_s<100)
+            else if (100*i/number_of_records_in_O<100)
                 cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
             else
                 cout << "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b";
@@ -430,7 +511,7 @@ void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type re
         int ii=0;
         for(typename vector < list<data_type> >::iterator it = kni.tkn.begin(); it != kni.tkn.end(); ++it)
         {
-           cout << ii << "# " << s[ii] << endl;
+           cout << ii << "# " << O[ii] << endl;
            (*it).sort(comparisonFunction);
            for(typename list<data_type>::iterator it2 = (*it).begin(); it2 != (*it).end(); ++it2)
            {
@@ -478,7 +559,7 @@ void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type re
         int ii=0;
         for(typename vector < list<data_type> >::iterator it = kni.tkn.begin(); it != kni.tkn.end(); ++it)
         {
-            plik << ii << "#" << s[ii] << endl;
+            plik << ii << "#" << O[ii] << endl;
             (*it).sort(comparisonFunction);
             for(typename list<data_type>::iterator it2 = (*it).begin(); it2 != (*it).end(); ++it2){
                 if(talkative)
@@ -514,7 +595,7 @@ void ti_l_neighborhood_index_algorithm(vector<data_type> &D, int k, data_type re
         plik.close();
     }
     else
-        cout << "Dostep do pliku zostal zabroniony!" << endl;
+        cout << "No access to the file!" << endl;
 }
 
 template <class data_type>
@@ -549,14 +630,11 @@ list<data_type> ti_k_neighborhood(vector<data_type> &D, data_type p, int k)
         }
         return k_neighborhood;
     }
-        //cout << "list<data_type> ti_k_neighborhood(vector<data_type> &D, data_type p, int k)" << endl;
-    //cout << "data_type p: " << p;
     data_type b = p;
     data_type f = p;
 
-    bool backwardSearch = precedingPoint(D, b);
-    bool forwardSearch = followingPoint(D, f);
-
+    bool backwardSearch = precedingRecord(D, b);
+    bool forwardSearch = followingRecord(D, f);
 
     int i = 0;
     typename list<data_type>::iterator it;
@@ -590,7 +668,7 @@ list<data_type> ti_k_neighborhood(vector<data_type> &D, data_type p, int k)
     return k_neighborhood;
 }
 template <class data_type>
-bool precedingPoint(vector<data_type> &D, data_type &p)
+bool precedingRecord(vector<data_type> &D, data_type &p)
 {
     if(p.position>0)
     {
@@ -601,7 +679,7 @@ bool precedingPoint(vector<data_type> &D, data_type &p)
          return false;
 }
 template <class data_type>
-bool followingPoint(vector<data_type> &D, data_type &p)
+bool followingRecord(vector<data_type> &D, data_type &p)
 {
     if(p.position!=D.size()-1)
     {
@@ -616,7 +694,6 @@ void find_first_k_candidate_neighbours_forward_and_backward(vector<data_type> &D
                                                             bool &backwardSearch, bool &forwardSearch,
                                                             list<data_type> &k_neighborhood, int k, int &i)
 {
-    //cout << "void find_first_k_candidate_neighbours_forward_and_backward" << endl;
     float distance;
     while(backwardSearch && forwardSearch && i<k)
     {
@@ -628,9 +705,9 @@ void find_first_k_candidate_neighbours_forward_and_backward(vector<data_type> &D
                 i = i+1;
                 data_type e = data_type(b.parameters, distance, b.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
-                backwardSearch=precedingPoint(D,b);
+                backwardSearch=precedingRecord(D,b);
             }
             else
             {
@@ -638,9 +715,9 @@ void find_first_k_candidate_neighbours_forward_and_backward(vector<data_type> &D
                 i = i+1;
                 data_type e = data_type(f.parameters, distance, f.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
-                forwardSearch=followingPoint(D,f);
+                forwardSearch=followingRecord(D,f);
             }
         }
         else
@@ -651,9 +728,9 @@ void find_first_k_candidate_neighbours_forward_and_backward(vector<data_type> &D
                 i = i+1;
                 data_type e = data_type(f.parameters, distance, f.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
-                forwardSearch=followingPoint(D,f);
+                forwardSearch=followingRecord(D,f);
             }
             else
             {
@@ -661,9 +738,9 @@ void find_first_k_candidate_neighbours_forward_and_backward(vector<data_type> &D
                 i = i+1;
                 data_type e = data_type(b.parameters, distance, b.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
-                backwardSearch=precedingPoint(D,b);
+                backwardSearch=precedingRecord(D,b);
             }
         }
     }
@@ -672,7 +749,6 @@ template <class data_type>
 void find_first_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p, data_type &b,
                                                 bool &backwardSearch, list<data_type> &k_neighborhood, int k, int &i)
 {
-    //cout << "void find_first_k_candidate_neighbours_backward" << endl;
     float distance;
     while(backwardSearch && i<k)
     {
@@ -680,16 +756,15 @@ void find_first_k_candidate_neighbours_backward(vector<data_type> &D, data_type 
         i = i+1;
         data_type e = data_type(b.parameters, distance, b.id);
         typename list<data_type>::iterator it;
-        it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+        it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
         k_neighborhood.insert(it, e);
-        backwardSearch=precedingPoint(D,b);
+        backwardSearch=precedingRecord(D,b);
     }
 }
 template <class data_type>
 void find_first_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p, data_type &f,
                                                bool &forwardSearch, list<data_type> &k_neighborhood, int k, int &i)
 {
-    //cout << "void find_first_k_candidate_neighbours_forward" << endl;
     float distance;
     while(forwardSearch && i<k)
     {
@@ -697,9 +772,9 @@ void find_first_k_candidate_neighbours_forward(vector<data_type> &D, data_type &
         i = i+1;
         data_type e = data_type(f.parameters, distance, f.id);
         typename list<data_type>::iterator it;
-        it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+        it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
         k_neighborhood.insert(it, e);
-        forwardSearch=followingPoint(D,f);
+        forwardSearch=followingRecord(D,f);
     }
 }
 template <class data_type>
@@ -735,7 +810,6 @@ void verify_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p, 
                     break;
                 }
             }
-            //cout << k_neighborhood.size() << " - " << edge_data_types << " >= " << k-1 << endl;
             if(k_neighborhood.size() - edge_data_types >= k - 1)
             {
                 if(1 < edge_data_types)
@@ -744,7 +818,7 @@ void verify_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p, 
                     k_neighborhood.erase(low);
                 data_type e = data_type(b.parameters, distance, b.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
                 p.eps = (*(--k_neighborhood.end())).distance;
             }
@@ -752,7 +826,7 @@ void verify_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p, 
             {
                 data_type e = data_type(b.parameters, distance, b.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
                 if(k_plus != true && k_neighborhood.size() > k)
                 {
@@ -766,11 +840,11 @@ void verify_k_candidate_neighbours_backward(vector<data_type> &D, data_type &p, 
             {
                 data_type e = data_type(b.parameters, distance, b.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
             }
         }
-        backwardSearch = precedingPoint(D, b);
+        backwardSearch = precedingRecord(D, b);
     }
 }
 template <class data_type>
@@ -808,7 +882,6 @@ void verify_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p, d
                     break;
                 }
             }
-            //cout << k_neighborhood.size() << " - " << edge_data_types << " >= " << k-1 << endl;
             if(k_neighborhood.size() - edge_data_types >= k - 1)
             {
                 if(1 < edge_data_types)
@@ -820,7 +893,7 @@ void verify_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p, d
 
                 data_type e = data_type(f.parameters, distance, f.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
                 p.eps = (*(--k_neighborhood.end())).distance;
             }
@@ -828,7 +901,7 @@ void verify_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p, d
             {
                 data_type e = data_type(f.parameters, distance, f.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
                 if(k_plus != true && k_neighborhood.size() > k)
                 {
@@ -842,15 +915,15 @@ void verify_k_candidate_neighbours_forward(vector<data_type> &D, data_type &p, d
             {
                 data_type e = data_type(f.parameters, distance, f.id);
                 typename list<data_type>::iterator it;
-                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), first_further(e.distance));
+                it = find_if(k_neighborhood.begin(), k_neighborhood.end(), firstFurther(e.distance));
                 k_neighborhood.insert(it, e);
             }
         }
-        forwardSearch = followingPoint(D, f);
+        forwardSearch = followingRecord(D, f);
     }
 }
 
-vector<DenseRecord> createPointVector(DenseDataVector denseDataVector, int decisionColumnNumber)
+vector<DenseRecord> createRecordVector(DenseDataVector denseDataVector, int decisionColumnNumber)
 {
     vector <DenseRecord> D;
     DenseRecord tmp;
@@ -858,7 +931,8 @@ vector<DenseRecord> createPointVector(DenseDataVector denseDataVector, int decis
     for(DenseDataVector::iterator it = denseDataVector.begin(); it != denseDataVector.end(); ++it)
     {
         tmp.parameters.clear();
-        for(vector<float>::iterator it2 = (*it).begin(); it2 != (*it).end(); ++it2){
+        for(vector<float>::iterator it2 = (*it).begin(); it2 != (*it).end(); ++it2)
+        {
             i++;
             if(i != decisionColumnNumber)
             {
@@ -871,7 +945,7 @@ vector<DenseRecord> createPointVector(DenseDataVector denseDataVector, int decis
     return D;
 }
 
-vector<SparseRecord> createPointVector(SparseDataVector sparseDataVector, int decisionColumnNumber)
+vector<SparseRecord> createRecordVector(SparseDataVector sparseDataVector, int decisionColumnNumber)
 {
     auto sortSparse = [](const std::pair<int,float> &left, const std::pair<int,float> &right) { return left.first < right.first;};
     for(SparseDataVector::iterator it = sparseDataVector.begin(); it!=sparseDataVector.end(); ++it)
@@ -914,9 +988,12 @@ vector <string> readDecisionClass(string filename)
                 if(decisionClassColumn!=col)
                     continue;
             }
-            try{
+            try
+            {
                 decisionClass.push_back(value);
-            } catch (const std::invalid_argument&) {
+            }
+            catch (const std::invalid_argument&)
+            {
                 decisionClass.push_back(0);
             }
         }

@@ -12,13 +12,13 @@ DenseRecord::DenseRecord(vector<float> p, float d, int i) : parameters(p)
     id=i;
 }
 
-float DenseRecord::calculateDistance(DenseRecord reference_point, int p)
+float DenseRecord::calculateDistance(DenseRecord reference_record, int p)
 {
     float sum = 0;
-    int dimensions = reference_point.parameters.size();
+    int dimensions = reference_record.parameters.size();
     for (int i = 0; i < dimensions; i++)
     {
-        sum += fabs(pow((parameters[i] - reference_point.parameters[i]), p));
+        sum += fabs(pow((parameters[i] - reference_record.parameters[i]), p));
     }
     return pow(sum, 1.0 / p);
 }

@@ -1,3 +1,5 @@
+#ifndef DENSEDATALOADER_H
+#define DENSEDATALOADER_H
 #include "Typedef.h"
 #include <string>
 #include <iostream>
@@ -6,19 +8,23 @@
 #include <iterator>
 #include <stdexcept>
 
-class DenseDataLoader{
+/**
+ *  Class used to load and store dense data
+ */
+
+class DenseDataLoader
+{
 	public:
-    DenseDataLoader():maxIndex(0){}
+    DenseDataLoader():maxIndex(0)
+    {
+    }
 	
     void readDenseData(std::string filename);
-    DenseDataVector getDataVector()
-    {
-		return denseDataVector;
-	}
-	
-	void displayData();
-	
+    void displayData();
+    DenseDataVector getDataVector();
+
     DenseDataVector denseDataVector;
 	double maxIndex;
-	
 };
+
+#endif

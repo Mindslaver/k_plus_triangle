@@ -1,5 +1,4 @@
 #include "DenseDataLoader.h"
-#include <stdlib.h>
 
 void DenseDataLoader::readDenseData(std::string filename)
 {
@@ -38,4 +37,9 @@ void DenseDataLoader::displayData(){
 		}
         std::cout << std::endl;
 	}	
+}
+
+DenseDataVector DenseDataLoader::getDataVector()
+{
+    return denseDataVector;
 }
