@@ -31,19 +31,32 @@ Date: 2015-01-15
 
    Parameters:
     -k <number of neighbours>
+    
     -D <path to the database file>
+    
     -O <path to the file with objects to classify>
+    
     -d <path to the file with classes names>
+    
     -n <column that stores class name; counted from 1 upwards>
+    
     -m <metric; 1=manhattan, 2=euclidean>
+    
 
    Switches:
     -p using k+ modification; off by default
+    
     -s indication, that data records are of the sparse format
+    
     -o suppresses terminal output (except for setup and log messages)
+    
     -c treat dense data as sparse or sparse data as dense - not recommended
+    
     -b brute force, namely no triangle optimization (~1000x slower)
+    
     -t more detailed output
+    
     -f forward heuristic, backward by default
+    
 
    Output file is called output.txt and is overwritten with every run.
