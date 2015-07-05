@@ -1,6 +1,6 @@
 # k_plus_triangle
 
-Author: Adam Anrzejczak
+Author: Adam Andrzejczak
 Date: 2015-01-15
 
  Description:  Implementation of a k+ neighbours algorithm with a triangle inequality optimization
