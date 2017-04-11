@@ -30,6 +30,7 @@ Date: 2015-01-15
     -k 6 -p -D dense.csv -O object.csv -n 2 -o -m 2 -f -c
 
    Parameters:
+   
     -k <number of neighbours>
     
     -D <path to the database file>
@@ -44,6 +45,7 @@ Date: 2015-01-15
     
 
    Switches:
+   
     -p using k+ modification; off by default
     
     -s indication, that data records are of the sparse format
